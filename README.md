@@ -4,7 +4,7 @@ Auto Tracker Exercise adalah project **computer vision** berbasis webcam yang bi
 - Mendeteksi pose tubuh pakai MediaPipe
 - Menghitung repetisi latihan secara otomatis
 - Menampilkan UI real-time (HUD, FPS, tombol reset)
-- Memberi audio feedback (beep) setiap repetisi terhitung
+- Audio feedback (beep) setiap repetisi terhitung
 
  dibuat untuk **eksplorasi + latihan bikin project yang beneran selesai**, bukan cuma mangkrak 😅
 
@@ -12,7 +12,7 @@ Auto Tracker Exercise adalah project **computer vision** berbasis webcam yang bi
 
 ## ✨ Features
 - 📷 Real-time webcam tracking
-- 💪 Deteksi exercise (Bicep Curl & Pull Up)
+- 💪 Deteksi exercise
 - 🔢 Rep counter otomatis + total
 - 🧠 Landmark smoothing (buat ngurangin jitter/noise)
 - 🔔 Beep sound setiap repetisi (biar tau kalo keitung)
@@ -25,8 +25,8 @@ Auto Tracker Exercise adalah project **computer vision** berbasis webcam yang bi
 
 ### 1) Clone
 ```bash
-git clone <repo-url>
-cd <repo-folder>
+git clone https://github.com/andhikkadd/auto-tracker-workout.git
+cd auto-tracker-workout
 ```
 ### 2) Install dependencies
 ```bash
