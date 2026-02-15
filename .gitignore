@@ -8,3 +8,4 @@ venv/
 .vscode/
 .history
 .history/core
+.gitignore
