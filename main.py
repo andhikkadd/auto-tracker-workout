@@ -23,10 +23,14 @@ while cap.isOpened():
         inst_fps = 1.0 / dt
         STATE["fps"] = STATE["fps"] * 0.9 + inst_fps * 0.1
 
-    frame = detect_pose(frame)
-
-    cv2.imshow("Detect",frame)
-    if cv2.waitKey(1) & 0xFF ==ord('q'):
+    frame = detect_pose(frame, None)
+    cv2.imshow("Tracker Workout",frame)
+    
+    key = cv2.waitKey(1) & 0xFF
+    if key != 255:
+        frame = detect_pose(frame, key)
+        cv2.imshow("", frame)
+    if key == ord('q'):
         break
 
 cap.release()

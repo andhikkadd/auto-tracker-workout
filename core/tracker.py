@@ -2,16 +2,15 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import winsound
-import time
 import math
 from types import SimpleNamespace
 import threading
+# import time
 
 from core.config import STATE
 from core.ui import render_ui
 
 mp_pose = mp.solutions.pose
-mp_draw = mp.solutions.drawing_utils
 
 def beep_async(freq=3000, dur=120):
     threading.Thread(target=winsound.Beep, args=(freq, dur), daemon=True).start()
@@ -20,7 +19,7 @@ def angle(a, b, c):
     a = np.array(a)
     b = np.array(b)
     c = np.array(c)
-
+    
     ba = a - b
     bc = c - b
 
@@ -53,6 +52,40 @@ def smooth_landmark(name, lm, alpha,):
     prev["visibility"] = prev["visibility"] * (1 - alpha) + lm_v * alpha
 
     return SimpleNamespace(**prev)
+
+def handle_mode_menu(key):
+    if key == ord('7'):
+        return "Bicep Curl"
+    if key == ord('8'):
+        return "Pull Up"
+    if key == ord('9'):
+        return "Squat"
+    
+    return None
+
+def set_active_mode(new_mode):
+    if new_mode is None:
+        return 
+    
+    if new_mode == STATE["active"]:
+        return 
+    
+    curl = STATE["curl"]
+    pull = STATE["pull"]
+    squat = STATE["squat"]  
+        
+    curl["L"]["reps"] = curl["R"]["reps"] = curl["prev_total"] = 0
+    pull["reps"] = pull["prev_total"] = 0
+    squat["reps"] = squat["prev_total"] = 0
+    curl["L"]["stage"] = curl["R"]["stage"] = pull["stage"] = squat["stage"] = None
+    
+    curl["L"]["down_hold"] = curl["L"]["up_hold"] = 0
+    curl["R"]["down_hold"] = curl["R"]["up_hold"] = 0
+    pull["up_hold"] = pull["down_hold"] = 0
+    squat["up_hold"] = squat["down_hold"] = 0
+    
+    STATE["active"] = new_mode
+    beep_async(700, 80)
 
 def process_curl(features):
     curl = STATE["curl"]
@@ -106,8 +139,8 @@ def process_curl(features):
 
         S["label"] = label
 
-    step_side("L", features["ang_L"], features["l_shoulder"], features["l_elbow"], features["l_wrist"])
-    step_side("R", features["ang_R"], features["r_shoulder"], features["r_elbow"], features["r_wrist"])
+    step_side("L", features["ang_curl_L"], features["l_shoulder"], features["l_elbow"], features["l_wrist"])
+    step_side("R", features["ang_curl_R"], features["r_shoulder"], features["r_elbow"], features["r_wrist"])
 
     after_total = curl["L"]["reps"] + curl["R"]["reps"]
     did_rep = after_total > curl["prev_total"]
@@ -115,67 +148,105 @@ def process_curl(features):
         curl["prev_total"] = after_total
     return did_rep
 
-def process_pull(features ):
-    lw = features["l_wrist"]
-    rw = features["r_wrist"]
-    ls = features["l_shoulder"]
-    rs = features["r_shoulder"]
-
-    wrist_y = (lw.y + rw.y) / 2
-    shoulder_y = (ls.y + rs.y) / 2
-
-    delta = shoulder_y - wrist_y
-
+def process_pull(features):
     pull = STATE["pull"]
-
-    if pull["bottom_ref"] is None or delta > pull["bottom_ref"] - pull["cfg"]["margin_y"]:
-        pull["bottom_hold"] += 1
+    
+    hands_overhead = features.get("hands_overhead", False)
+    hold_n = pull["cfg"]["hold_n"]
+    down_th = 140
+    up_th = 70
+    
+    elbow_min = min(features["ang_curl_L"], features["ang_curl_R"])
+    
+    if not hands_overhead:
+        pull["stage"] = None
+        pull["down_hold"] = 0
+        pull["up_hold"] = 0
+        return False
+    
+    if elbow_min > down_th:
+        label = "down"
+    elif elbow_min < up_th:
+        label = "up"
     else:
-        pull["bottom_hold"] = 0
+        label = "mid"
+        
+    if label == "down":
+        pull["down_hold"] += 1
+    else:
+        pull["down_hold"] = 0
+        
+    if label == "up":
+        pull["up_hold"] += 1
+    else:
+        pull["up_hold"] = 0
 
-    if pull["bottom_hold"] >= pull["cfg"]["hold_n"]:
-        pull["bottom_ref"] = (
-            delta if pull["bottom_ref"] is None
-            else pull["bottom_ref"] * (1 - STATE["alpha"]) + delta * STATE["alpha"]
-        )
+    if pull["stage"] is None:
+        if label == "down" and pull["down_hold"] >= hold_n:
+            pull["stage"] = "down"
+        return False
+    
+    if pull["stage"] == "down" and label == "up" and pull["up_hold"] >= (hold_n - 1):
+        pull["reps"] += 1
+        pull["stage"] = "up"
+        return True
+    
+    if pull["stage"] == "up" and label == "down" and pull["down_hold"] >= hold_n:
         pull["stage"] = "down"
 
-    if pull["top_ref"] is None or delta < pull["top_ref"] + pull["cfg"]['margin_y']:
-        pull["top_hold"] += 1
+def process_squat(features):
+    squat = STATE["squat"]
+    hold_n = squat["cfg"]["hold_n"]
+    v = STATE["v"]
+    
+    down_th = 105
+    up_th = 160
+    
+    ang_squ_L = features["ang_squat_L"]
+    ang_squ_R = features["ang_squat_R"]
+    knee_ang = min(ang_squ_L, ang_squ_R)
+    
+    if knee_ang < down_th:
+        label = "squat down"
+    elif knee_ang > up_th:
+        label = "squat up"
     else:
-        pull["top_hold"] = 0
-
-    if pull["top_hold"] >= pull["cfg"]["hold_n"]:
-        pull["top_ref"] = (
-            delta if pull["top_ref"] is None
-            else pull["top_ref"] * (1 - STATE["alpha"]) + delta * STATE["alpha"]
-        )
-
-        if pull["stage"] == "down":
-            pull["reps"] += 1
-            pull["stage"] = "up"
-
-    did_rep = pull["reps"] > pull["prev_total"]
+        label = "mid"
+        
+    if label == "squat down":
+        squat["stage"] = "down"
+        
+    if label == "squat up" and squat["stage"] == "down":
+        squat["reps"] += 1
+        squat["stage"] = "up"
+        
+    did_rep = squat["reps"] > squat["prev_total"]
     if did_rep:
-        pull["prev_total"] = pull["reps"]
+        squat["prev_total"] = squat["reps"]
     return did_rep
+    
 
-def detect_pose(frame):
+def detect_pose(frame, key=None):
     rgb = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-    results = pose.process(rgb)
+    results_pose = pose.process(rgb)
 
-    if not results.pose_landmarks:
+    if not results_pose.pose_landmarks:
         return frame
 
-    lm = results.pose_landmarks.landmark
+    lm = results_pose.pose_landmarks.landmark
     features = extract_features(lm, frame.shape[:2])
+    
+    new_mode = handle_mode_menu(key)
+    set_active_mode(new_mode)
+    
+    if STATE.get("pending_mode") is not None:
+        set_active_mode(STATE["pending_mode"])
+        STATE["pending_mode"] = None
 
-    STATE["active"] = detect_exercise(features)
 
     update_active_counter(features)
 
-    # BEDANYA CUMA DI SINI: render_ui dikasih STATE dan beep_async
-    frame = render_ui(frame, features, STATE, beep_async)
+    frame = render_ui(frame, features, beep_async)
     return frame
 
 pose = mp_pose.Pose(
@@ -202,19 +273,41 @@ def extract_features(lm, shape):
     r_knee = smooth_landmark("r_knee", lm[mp_pose.PoseLandmark.RIGHT_KNEE], STATE["smooth_alpha"])
     r_ankle = smooth_landmark("r_ankle", lm[mp_pose.PoseLandmark.RIGHT_ANKLE], STATE["smooth_alpha"])
 
-    ang_L = angle((l_shoulder.x, l_shoulder.y),
+    ang_curl_L = angle((l_shoulder.x, l_shoulder.y),
                 (l_elbow.x, l_elbow.y),
                 (l_wrist.x, l_wrist.y))
-
-    ang_R = angle((r_shoulder.x, r_shoulder.y),
+    
+    ang_curl_R = angle((r_shoulder.x, r_shoulder.y),
                 (r_elbow.x, r_elbow.y),
                 (r_wrist.x, r_wrist.y))
+    
+    # curl
+    elbow_bent = min(ang_curl_L, ang_curl_R) < 120
 
+    # pull
+    # pull_delta = ((l_shoulder.y + r_shoulder.y) / 2) - ((l_wrist.y + r_wrist.y) / 2)
+    # pull_elbow_straight = min(ang_curl_L, ang_curl_R) > 150
+    
     hands_overhead = (
         l_wrist.visibility > STATE["v"] and r_wrist.visibility > STATE["v"] and
+        l_elbow.visibility > STATE["v"] and r_elbow.visibility > STATE["v"] and
         l_shoulder.visibility > STATE["v"] and r_shoulder.visibility > STATE["v"] and
-        l_wrist.y < l_shoulder.y and r_wrist.y < r_shoulder.y
-    )
+        l_wrist.y < l_shoulder.y and r_wrist.y < r_shoulder.y)
+
+    # squat
+    ang_squat_L = angle((l_hip.x, l_hip.y),
+                        (l_knee.x, l_knee.y),
+                        (l_ankle.x, l_ankle.y))
+    
+    ang_squat_R = angle((r_hip.x, r_hip.y),
+                        (r_knee.x, r_knee.y),
+                        (r_ankle.x, r_ankle.y))
+    
+    knee_bent = min(ang_squat_L, ang_squat_R) < 150
+    
+    vis_lower_L = (l_hip.visibility > STATE["v"] and l_knee.visibility > STATE["v"] and l_ankle.visibility > STATE["v"])
+    vis_lower_R = (r_hip.visibility > STATE["v"] and r_knee.visibility > STATE["v"] and r_ankle.visibility > STATE["v"])
+    vis_ok_lower = vis_lower_L or vis_lower_R
 
     return {
         "l_shoulder": l_shoulder, "r_shoulder": r_shoulder,
@@ -227,42 +320,37 @@ def extract_features(lm, shape):
 
         "li_px" : (int(l_index.x * W), int(l_index.y * H)),
         "ri_px" : (int(r_index.x * W), int(r_index.y * H)),
-
-        "ang_L": ang_L,
-        "ang_R": ang_R,
-
+        
+        # curl
+        "ang_curl_L": ang_curl_L,
+        "ang_curl_R": ang_curl_R,
+        "elbow_bent": elbow_bent,
+        
+        # pull
+        # "pull_delta": pull_delta,
         "hands_overhead": hands_overhead,
-
+        
         "vis_ok_upper": (
             l_shoulder.visibility > STATE["v"] and r_shoulder.visibility > STATE["v"] and
-            l_elbow.visibility > STATE["v"] and r_elbow.visibility > STATE["v"]
-        )
+            l_elbow.visibility > STATE["v"] and r_elbow.visibility > STATE["v"]),
+        
+        # "pull_ready": (hands_overhead),
+        
+        # squat
+        "ang_squat_L": ang_squat_L,
+        "ang_squat_R": ang_squat_R,
+        
+        "vis_ok_lower": vis_ok_lower,
+        "knee_bent" : knee_bent,
     }
-
-def detect_exercise(features):
-    if not features["vis_ok_upper"]:
-        STATE["cand_curl"] = 0
-        STATE["cand_pull"] = 0
-        return None
-
-    if features["hands_overhead"]:
-        STATE["cand_pull"] += 1
-        STATE["cand_curl"] = 0
-        if STATE["cand_pull"] >= STATE["active_hold_n"]:
-            return "Pull Up"
-    else:
-        STATE["cand_curl"] += 1
-        STATE["cand_pull"] = 0
-        if STATE["cand_curl"] >= STATE["active_hold_n"]:
-            return "Bicep Curl"
-
-    return STATE["active"]
 
 def update_active_counter(features):
     if STATE["active"] == "Bicep Curl":
         if process_curl(features):
             beep_async(3000, 120)
-
     if STATE["active"] == "Pull Up":
         if process_pull(features):
+            beep_async(3000, 120)
+    if STATE["active"] == "Squat":
+        if process_squat(features):
             beep_async(3000, 120)
