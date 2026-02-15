@@ -12,7 +12,6 @@ Auto Tracker Exercise adalah project **computer vision** berbasis webcam yang bi
 
 ## ✨ Features
 - 📷 Real-time webcam tracking
-- 💪 Deteksi exercise
 - 🔢 Rep counter otomatis + total
 - 🧠 Landmark smoothing (buat ngurangin jitter/noise)
 - 🔔 Beep sound setiap repetisi (biar tau kalo keitung)
